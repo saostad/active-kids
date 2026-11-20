@@ -1,0 +1,61 @@
+name: Android
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Verify and build
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease -PunsignedRelease=true
+      - name: Sign and verify the release APK
+        if: github.ref_type == 'tag'
+        env:
+          APK_SIGNING_KEYSTORE_BASE64: ${{ secrets.APK_SIGNING_KEYSTORE_BASE64 }}
+          APK_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APK_SIGNING_KEYSTORE_PASSWORD }}
+          EXPECTED_CERT_SHA256: ad70657307d8e4d60f0d73bccb6d2731d7c58f9a562966d678b74b022c069823
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${APK_SIGNING_KEYSTORE_BASE64:?Signing keystore secret is missing}"
+          : "${APK_SIGNING_KEYSTORE_PASSWORD:?Signing password secret is missing}"
+          umask 077
+          keystore="$(mktemp "$RUNNER_TEMP/active-kids.XXXXXXXX.p12")"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$APK_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          mkdir -p release
+          apk="release/active-kids-${GITHUB_REF_NAME}.apk"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$apksigner" sign --ks "$keystore" --ks-type PKCS12 --ks-key-alias androiddebugkey \
+            --ks-pass env:APK_SIGNING_KEYSTORE_PASSWORD --key-pass env:APK_SIGNING_KEYSTORE_PASSWORD \
+            --out "$apk" app/build/outputs/apk/release/app-release-unsigned.apk
+          cert="$("$apksigner" verify -Werr --print-certs "$apk" | sed -n 's/^.*certificate SHA-256 digest: //p' | sort -u)"
+          if [[ "$cert" != "$EXPECTED_CERT_SHA256" ]]; then
+            echo "::error::The APK signing certificate does not match the existing Active Kids installs."
+            exit 1
+          fi
+          (cd release && sha256sum "active-kids-${GITHUB_REF_NAME}.apk" > SHA256SUMS)
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            "release/active-kids-${GITHUB_REF_NAME}.apk" release/SHA256SUMS
