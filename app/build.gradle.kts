@@ -47,8 +47,8 @@ android {
         applicationId = "com.activekids"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         // Pixel 8 Pro (and every modern phone) is arm64; dropping other ABIs shrinks MediaPipe's native libs.
         ndk { abiFilters += "arm64-v8a" }
     }

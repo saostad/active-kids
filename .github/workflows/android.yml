@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -21,8 +21,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Check Android SDK packages
+        run: |
+          if [[ ! -f "$ANDROID_HOME/platforms/android-36/android.jar" || ! -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" ]]; then
+            echo "::error::The runner is missing Android SDK 36 or build-tools 36.0.0."
+            exit 1
+          fi
       - name: Verify and build
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleRelease -PunsignedRelease=true
       - name: Sign and verify the release APK
